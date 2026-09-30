@@ -1,0 +1,5 @@
+﻿round,mode,elapsed_seconds,input_tokens,output_tokens,tool_calls,iterations,memory_hit,wall_seconds
+1,cold,4.62,4076,833,4,1,False,5.74
+1,warm,3.91,3105,829,3,1,True,5.12
+2,cold,4.18,4074,837,4,1,False,5.0
+2,warm,3.95,3079,804,3,1,True,5.0

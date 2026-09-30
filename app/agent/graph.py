@@ -30,8 +30,9 @@ _llm_with_tools: ChatOpenAI | None = None
 _llm_plain: ChatOpenAI | None = None
 
 
-def _get_llms() -> tuple[ChatOpenAI, ChatOpenAI]:
-    """惰性初始化：避免导入阶段就要求 API Key 存在"""
+def get_llms() -> tuple[ChatOpenAI, ChatOpenAI]:
+    """惰性初始化：避免导入阶段就要求 API Key 存在。
+    返回 (带工具绑定的 LLM, 无工具 LLM)；无工具实例供摘要压缩等旁路调用复用"""
     global _llm_with_tools, _llm_plain
     settings = get_settings()
     if _llm_with_tools is None:
@@ -65,7 +66,7 @@ async def _execute_with_retry(tool_name: str, args: dict) -> str:
 
 
 async def agent_node(state: AgentState) -> dict:
-    llm, _ = _get_llms()
+    llm, _ = get_llms()
     response = await llm.ainvoke(state["messages"])
     return {"messages": [response]}
 
@@ -84,7 +85,7 @@ async def tools_node(state: AgentState) -> dict:
 
 async def force_summarize_node(state: AgentState) -> dict:
     """守卫节点：轮次超限后剥离工具能力，强制模型基于已有信息收尾"""
-    _, llm_plain = _get_llms()
+    _, llm_plain = get_llms()
     messages = [*state["messages"], HumanMessage(content=FORCE_SUMMARIZE_PROMPT)]
     response = await llm_plain.ainvoke(messages)
     return {"messages": [response]}

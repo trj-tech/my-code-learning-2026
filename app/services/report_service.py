@@ -5,9 +5,9 @@ import uuid
 
 from langchain_core.messages import HumanMessage
 
-from app.agent.graph import build_graph
+from app.agent.graph import build_graph, get_llms
 from app.agent.memory import LongTermMemory
-from app.agent.prompts import FORMAT_INSTRUCTION, SYSTEM_PROMPT
+from app.agent.prompts import FORMAT_INSTRUCTION, SYSTEM_PROMPT, SUMMARY_PROMPT
 from app.config import get_settings
 from app.models.schemas import GenerateReportRequest
 from app.services.metrics import metrics
@@ -45,10 +45,16 @@ async def generate_report(req: GenerateReportRequest) -> dict:
     period = f"{req.since[:10]} ~ {req.until[:10]}"
     run_id = f"{req.team}-{uuid.uuid4().hex[:8]}"
 
-    # 长期记忆：命中缓存则注入上期周报，保持格式延续并减少额外归纳调用
-    last_report = await _ltm.get_last_report(req.team)
+    # 长期记忆：命中缓存则注入上期周报摘要，保持格式延续并减少额外归纳调用
+    last_summary = await _ltm.get_last_summary(req.team)
+    # 命中记忆时禁止重复检索历史周报（与摘要功能重叠，省一次工具调用）
+    no_search_hint = (
+        "注意：上期周报摘要已在上方给出，不要调用 search_similar_reports。"
+        if last_summary else ""
+    )
     task_prompt = FORMAT_INSTRUCTION.format(
-        last_report=last_report or "（无历史周报）",
+        last_report=last_summary or "（无历史周报）",
+        no_search_hint=no_search_hint,
         period=period, repo=req.repo, since=req.since, until=req.until,
     )
 
@@ -75,12 +81,16 @@ async def generate_report(req: GenerateReportRequest) -> dict:
         len(getattr(m, "tool_calls", None) or []) for m in final["messages"]
     )
 
-    # 产出沉淀：向量库（供后续检索）+ Redis 长期记忆（供下期延续）
+    # 产出沉淀：向量库（供后续检索）+ Redis 长期记忆（存摘要，下期注入省 token）
     try:
         await save_report_to_index(
             report, {"run_id": run_id, "team": req.team, "period": period}
         )
-        await _ltm.save_last_report(req.team, report)
+        _, llm_plain = get_llms()
+        summary_resp = await llm_plain.ainvoke(
+            [HumanMessage(content=SUMMARY_PROMPT.format(report=report))]
+        )
+        await _ltm.save_last_summary(req.team, summary_resp.text)
     except Exception as e:  # 沉淀失败不影响本次产出
         logger.warning("周报沉淀失败（向量库/Redis）: %s", e)
 
@@ -97,6 +107,6 @@ async def generate_report(req: GenerateReportRequest) -> dict:
             "output_tokens": output_tokens,
             "tool_calls": tool_calls,
             "iterations": final["iterations"],
-            "memory_hit": last_report is not None,
+            "memory_hit": last_summary is not None,
         },
     }

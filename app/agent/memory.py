@@ -3,9 +3,9 @@
 - 短期记忆：LangGraph checkpointer 保存单次任务的多轮工具调用上下文，
   支持 graph 中断恢复。生产环境把 MemorySaver 换成 langgraph-checkpoint-redis
   的 RedisSaver 即可持久化，接口不变。
-- 长期记忆：Redis 缓存团队上一期周报全文。下次生成时注入 prompt 作为格式与
-  内容延续性参考，命中缓存可跳过向量检索与额外归纳调用——这是"重复调用
-  成本降低"的核心手段。
+- 长期记忆：Redis 缓存团队上一期周报的**摘要**（约 100 字，生成时由 LLM 压缩）。
+  下次生成时注入 prompt 作为格式与内容延续性参考——摘要而非全文，是控制
+  input token 的关键（全文注入会让 token 反升）。
 - 降级策略：Redis 不可用时静默降级为无缓存模式，不影响主流程。
 """
 import logging
@@ -46,7 +46,7 @@ class LongTermMemory:
     def _key(team: str) -> str:
         return f"ltm:last_report:{team}"
 
-    async def get_last_report(self, team: str) -> str | None:
+    async def get_last_summary(self, team: str) -> str | None:
         redis = await self._get_redis()
         if redis is None:
             return None
@@ -56,11 +56,11 @@ class LongTermMemory:
             logger.warning("读取长期记忆失败: %s", e)
             return None
 
-    async def save_last_report(self, team: str, report: str) -> None:
+    async def save_last_summary(self, team: str, summary: str) -> None:
         redis = await self._get_redis()
         if redis is None:
             return
         try:
-            await redis.set(self._key(team), report, ex=LTM_TTL_SECONDS)
+            await redis.set(self._key(team), summary, ex=LTM_TTL_SECONDS)
         except Exception as e:
             logger.warning("写入长期记忆失败: %s", e)
