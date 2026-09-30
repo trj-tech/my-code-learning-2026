@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     # GitHub 数据源
     github_token: str = ""
 
+    # 飞书数据源（自建应用凭据 + 知识库文档 token 列表，逗号分隔）
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_doc_tokens: str = ""
+
     # Redis（长期记忆缓存）
     redis_url: str = "redis://localhost:6379/0"
 
